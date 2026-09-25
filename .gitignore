@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+device/agentdeck/config.json
+device/agentdeck/highscore.json
+device/agentdeck/log.txt
+device/agentdeck/input-test.txt
+device/agentdeck/fonts/*.ttf

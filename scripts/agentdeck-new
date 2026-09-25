@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Start a Claude Code or Codex session inside tmux so AgentDeck can see it.
+# Usage: agentdeck-new <claude|codex> [dir] [session-name]
+set -euo pipefail
+tool="${1:-claude}"
+dir="${2:-$PWD}"
+dir="$(cd "$dir" && pwd)"
+name="${3:-$tool-$(basename "$dir")}"
+name="$(echo "$name" | tr '.: ' '---')"
+
+if ! command -v tmux >/dev/null; then
+  echo "tmux not found. Install it with: brew install tmux" >&2
+  exit 1
+fi
+if tmux has-session -t "=$name" 2>/dev/null; then
+  echo "Session $name already exists. Attach with: tmux attach -t $name"
+  exit 0
+fi
+
+# 100x32 keeps the text readable on a 640x480 screen. The session keeps a
+# shell open after the agent exits so you can restart it.
+tmux new-session -d -s "$name" -x 100 -y 32 -c "$dir" "$tool; exec \$SHELL -l"
+echo "Started $name in $dir"
+echo "Watch it on the Mac with: tmux attach -t $name"

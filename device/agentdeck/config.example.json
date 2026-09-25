@@ -1,0 +1,15 @@
+{
+  "host": "192.168.1.50",
+  "port": 8765,
+  "token": "paste-the-token-from-the-agent",
+  "fullscreen": true,
+  "buttons": {
+    "a": 0, "b": 1, "y": 2, "x": 3,
+    "l1": 4, "r1": 5, "select": 6, "start": 7, "menu": 8,
+    "l2": 9, "r2": 10
+  },
+  "quick_replies": [
+    {"label": "Run the tests", "text": "run the tests and fix any failures", "enter": true},
+    {"label": "Commit and push", "text": "commit and push this", "enter": true}
+  ]
+}
