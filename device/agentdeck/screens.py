@@ -111,6 +111,17 @@ class SessionsScreen:
     def menu_items(self):
         return [{"label": "Type a message…", "kb": True}] + self.quick
 
+    def open_keyboard(self):
+        """FN/Menu hotkey: jump straight to the on-screen keyboard."""
+        lst = self.sessions()
+        if self.mode == "list":
+            if not lst:
+                self.app.toast("No session to type into")
+                return
+            self._open(lst[min(self.sel, len(lst) - 1)])
+        self.mode = "keyboard"
+        self.kb_r = self.kb_c = 0
+
     # ---- on-screen keyboard
     def _kb_rows(self):
         return (KB_UPPER if self.kb_shift else KB_LOWER)
@@ -240,12 +251,12 @@ class SessionsScreen:
 
     def hints(self):
         if self.mode == "list":
-            return [("A", "Open"), ("Y", "Refresh"), ("L1/R1", "Tabs")]
+            return [("A", "Open"), ("FN", "Keyboard"), ("Y", "Refresh"), ("L1/R1", "Tabs")]
         if self.mode == "menu":
             return [("A", "Pick"), ("B", "Close")]
         if self.mode == "keyboard":
             return [("A", "Key"), ("X", "Shift"), ("Y", "Send"), ("B", "Del/Back")]
-        return [("A", "Enter"), ("X", "Esc"), ("Y", "Quick"), ("D-pad", "Arrows"),
+        return [("A", "Enter"), ("X", "Esc"), ("Y", "Quick"), ("FN", "Keyboard"),
                 ("L2/R2", "Scroll"), ("B", "Back")]
 
     # ---- drawing

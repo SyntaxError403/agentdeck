@@ -19,6 +19,7 @@ from screens import GitHubScreen, MacScreen, SessionsScreen  # noqa: E402
 
 TOP_H, BOT_H = 40, 34
 REPEAT_DELAY, REPEAT_RATE = 0.35, 0.09
+MENU_HOLD = 0.8   # seconds to hold Menu/FN for quit; a short tap opens the keyboard
 
 
 def load_config(path=None):
@@ -42,6 +43,8 @@ class App:
         self.toast_msg, self.toast_until = "", 0.0
         self.tabs = [SessionsScreen(self), MacScreen(self), GitHubScreen(self), ByteRun(self)]
         self.tab = 0
+        self.menu_down_at = None
+        self.want_quit = False
         self.tabs[0].on_show()
 
     @property
@@ -61,8 +64,29 @@ class App:
             self.set_tab(self.tab - 1)
         elif action == "r1":
             self.set_tab(self.tab + 1)
+        elif action == "menu":
+            self.menu_down_at = time.time()   # short tap = keyboard, long hold = quit
         else:
             self.current.handle(action)
+
+    def release(self, action, now):
+        if action == "menu" and self.menu_down_at is not None:
+            held = now - self.menu_down_at
+            self.menu_down_at = None
+            if held < MENU_HOLD:
+                self.open_keyboard()
+
+    def open_keyboard(self):
+        if not isinstance(self.current, SessionsScreen):
+            self.set_tab(0)
+        self.current.open_keyboard()
+
+    def tick_hotkeys(self, now):
+        if self.menu_down_at is not None and now - self.menu_down_at >= MENU_HOLD:
+            self.menu_down_at = None
+            self.want_quit = True
+        if {"select", "start"} <= self.held:
+            self.want_quit = True
 
     def repeat_tick(self, now):
         for a in ("up", "down", "left", "right", "l2", "r2"):
@@ -108,6 +132,8 @@ class App:
             x = r.right + 14
         if time.time() < self.toast_until:
             T.text(surf, self.toast_msg, (T.W - 12, y + BOT_H // 2), 14, T.GOOD, anchor="midright")
+        else:
+            T.text(surf, "Hold FN: Quit", (T.W - 12, y + BOT_H // 2), 13, T.FAINT, anchor="midright")
 
     def draw(self, surf):
         surf.fill(T.BG)
@@ -192,7 +218,9 @@ def main():
                 else:
                     app.held.discard(action)
                     app.next_repeat.pop(action, None)
-        if {"select", "start"} <= app.held:
+                    app.release(action, now)
+        app.tick_hotkeys(now)
+        if app.want_quit:
             running = False
         app.repeat_tick(now)
         app.current.update(dt)
