@@ -36,7 +36,7 @@ If you already drive sessions from your phone with Claude Code's Remote Control,
 ## 1. Set up the Mac
 
 ```bash
-git clone https://github.com/<you>/agentdeck.git
+git clone https://github.com/SyntaxError403/agentdeck.git
 cd agentdeck
 brew install tmux
 ./scripts/install-mac.sh
