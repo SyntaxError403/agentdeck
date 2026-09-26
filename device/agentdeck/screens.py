@@ -27,6 +27,12 @@ DEFAULT_QUICK = [
 
 TOOL_TAGS = {"claude": ("Claude", T.CLAUDE), "codex": ("Codex", T.CODEX), "shell": ("Shell", T.SHELL)}
 
+# On-screen keyboard. Last row holds action keys (2 cells wide each in the grid).
+KB_LOWER = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm,.?"]
+KB_UPPER = ["!@#$%^&*()", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM;:/"]
+KB_ACTIONS = ["shift", "space", "back", "send"]  # bottom row
+KB_ACTION_LABEL = {"shift": "Shift", "space": "Space", "back": "Del", "send": "Send"}
+
 
 def offline_panel(surf, rect, app):
     x, y, w, h = rect
@@ -45,7 +51,7 @@ class SessionsScreen:
 
     def __init__(self, app):
         self.app = app
-        self.mode = "list"      # list | detail | menu
+        self.mode = "list"      # list | detail | menu | keyboard
         self.sel = 0
         self.pane = None
         self.scroll = 0
@@ -53,6 +59,11 @@ class SessionsScreen:
         self.quick = DEFAULT_QUICK + list(app.cfg.get("quick_replies", []))
         self._cache_key = None
         self._cache = None
+        # on-screen keyboard state
+        self.kb_text = ""
+        self.kb_r = 0
+        self.kb_c = 0
+        self.kb_shift = False
 
     # ---- data
     def sessions(self):
@@ -97,6 +108,76 @@ class SessionsScreen:
         self.app.toast("Sent " + label)
         self.scroll = 0
 
+    def menu_items(self):
+        return [{"label": "Type a message…", "kb": True}] + self.quick
+
+    # ---- on-screen keyboard
+    def _kb_rows(self):
+        return (KB_UPPER if self.kb_shift else KB_LOWER)
+
+    def _kb_cell(self):
+        """The value under the cursor: a single char, or an action name."""
+        rows = self._kb_rows()
+        if self.kb_r < len(rows):
+            row = rows[self.kb_r]
+            return row[min(self.kb_c, len(row) - 1)]
+        return KB_ACTIONS[min(self.kb_c, len(KB_ACTIONS) - 1)]
+
+    def _kb_row_len(self, r):
+        rows = self._kb_rows()
+        return len(rows[r]) if r < len(rows) else len(KB_ACTIONS)
+
+    def _kb_type(self, ch):
+        if len(self.kb_text) < 480:
+            self.kb_text += ch
+
+    def _kb_activate(self):
+        cell = self._kb_cell()
+        if cell == "shift":
+            self.kb_shift = not self.kb_shift
+        elif cell == "space":
+            self._kb_type(" ")
+        elif cell == "back":
+            self.kb_text = self.kb_text[:-1]
+        elif cell == "send":
+            self._kb_send()
+        else:
+            self._kb_type(cell)
+
+    def _kb_send(self):
+        txt = self.kb_text.strip("\n")
+        if txt:
+            self._send("message", text=txt, enter=True)
+        self.kb_text = ""
+        self.kb_shift = False
+        self.mode = "detail"
+
+    def _handle_keyboard(self, a, repeat=False):
+        rows = self._kb_rows()
+        nrows = len(rows) + 1  # + action row
+        if a == "up":
+            self.kb_r = (self.kb_r - 1) % nrows
+        elif a == "down":
+            self.kb_r = (self.kb_r + 1) % nrows
+        elif a == "left":
+            self.kb_c = (self.kb_c - 1) % self._kb_row_len(self.kb_r)
+        elif a == "right":
+            self.kb_c = (self.kb_c + 1) % self._kb_row_len(self.kb_r)
+        elif repeat:
+            return
+        elif a == "a":
+            self._kb_activate()
+        elif a == "b":
+            if self.kb_text:
+                self.kb_text = self.kb_text[:-1]   # backspace
+            else:
+                self.mode = "detail"               # cancel when empty
+        elif a == "x":
+            self.kb_shift = not self.kb_shift
+        elif a == "y":
+            self._kb_send()
+        self.kb_c = min(self.kb_c, self._kb_row_len(self.kb_r) - 1)
+
     # ---- input
     def handle(self, a, repeat=False):
         if self.mode == "list":
@@ -113,16 +194,25 @@ class SessionsScreen:
             return
 
         if self.mode == "menu":
+            items = self.menu_items()
             if a == "up":
-                self.menu_sel = (self.menu_sel - 1) % len(self.quick)
+                self.menu_sel = (self.menu_sel - 1) % len(items)
             elif a == "down":
-                self.menu_sel = (self.menu_sel + 1) % len(self.quick)
+                self.menu_sel = (self.menu_sel + 1) % len(items)
             elif a == "a" and not repeat:
-                q = self.quick[self.menu_sel]
-                self._send(q["label"], q.get("keys"), q.get("text"), q.get("enter", False))
-                self.mode = "detail"
+                q = items[self.menu_sel]
+                if q.get("kb"):
+                    self.mode = "keyboard"
+                    self.kb_r = self.kb_c = 0
+                else:
+                    self._send(q["label"], q.get("keys"), q.get("text"), q.get("enter", False))
+                    self.mode = "detail"
             elif a in ("b", "y"):
                 self.mode = "detail"
+            return
+
+        if self.mode == "keyboard":
+            self._handle_keyboard(a, repeat)
             return
 
         # detail
@@ -152,7 +242,9 @@ class SessionsScreen:
         if self.mode == "list":
             return [("A", "Open"), ("Y", "Refresh"), ("L1/R1", "Tabs")]
         if self.mode == "menu":
-            return [("A", "Send"), ("B", "Close")]
+            return [("A", "Pick"), ("B", "Close")]
+        if self.mode == "keyboard":
+            return [("A", "Key"), ("X", "Shift"), ("Y", "Send"), ("B", "Del/Back")]
         return [("A", "Enter"), ("X", "Esc"), ("Y", "Quick"), ("D-pad", "Arrows"),
                 ("L2/R2", "Scroll"), ("B", "Back")]
 
@@ -171,6 +263,8 @@ class SessionsScreen:
             self._draw_detail(surf, rect)
             if self.mode == "menu":
                 self._draw_menu(surf, rect)
+            elif self.mode == "keyboard":
+                self._draw_keyboard(surf, rect)
 
     def _draw_list(self, surf, rect, data):
         x, y, w, h = rect
@@ -200,10 +294,15 @@ class SessionsScreen:
             T.rrect(surf, T.RAISED if selected else T.PANEL, (x + 12, ry, w - 24, row_h - 8), 10)
             if selected:
                 T.rrect(surf, T.FG, (x + 12, ry, w - 24, row_h - 8), 10, width=2)
-            label, color = TOOL_TAGS.get(s.get("tool"), TOOL_TAGS["shell"])
-            T.rrect(surf, color, (x + 24, ry + 10, 6, row_h - 28), 3)
+            tool = s.get("tool")
+            label, color = TOOL_TAGS.get(tool, TOOL_TAGS["shell"])
+            tx = x + 42
+            if tool == "claude" and T.icon(surf, "claude.png", (x + 32, ry + (row_h - 8) // 2), 30):
+                tx = x + 56
+            else:
+                T.rrect(surf, color, (x + 24, ry + 10, 6, row_h - 28), 3)
             name = "%s:%s" % (s["session"], s["window"])
-            T.text(surf, name, (x + 42, ry + 8), 19, T.FG, bold=True, maxw=w - 260)
+            T.text(surf, name, (tx, ry + 8), 19, T.FG, bold=True, maxw=w - 260)
             if s.get("waiting"):
                 status, scol = "Needs input", (T.ATTN if blink else T.FG)
             else:
@@ -214,7 +313,7 @@ class SessionsScreen:
             T.text(surf, label, (x + w - 30, ry + 32), 14, color, anchor="topright")
             sub = os.path.basename(s.get("cwd", "").rstrip("/")) or "~"
             last = s.get("last_line", "")
-            T.text(surf, sub + "   " + last, (x + 42, ry + 34), 14, T.DIM, maxw=w - 170)
+            T.text(surf, sub + "   " + last, (tx, ry + 34), 14, T.DIM, maxw=w - 170)
 
         if len(lst) > visible:
             T.text(surf, "%d/%d" % (self.sel + 1, len(lst)), (x + w - 16, y + h - 4), 13, T.FAINT,
@@ -259,10 +358,15 @@ class SessionsScreen:
     def _draw_detail(self, surf, rect):
         x, y, w, h = rect
         s = self.current()
-        label, color = TOOL_TAGS.get((s or {}).get("tool"), TOOL_TAGS["shell"])
-        T.rrect(surf, color, (x + 12, y + 8, 6, 26), 3)
+        tool = (s or {}).get("tool")
+        label, color = TOOL_TAGS.get(tool, TOOL_TAGS["shell"])
+        tx = x + 26
+        if tool == "claude" and T.icon(surf, "claude.png", (x + 20, y + 20), 28):
+            tx = x + 40
+        else:
+            T.rrect(surf, color, (x + 12, y + 8, 6, 26), 3)
         title = "%s:%s" % (s["session"], s["window"]) if s else "Session closed"
-        T.text(surf, title, (x + 26, y + 8), 19, T.FG, bold=True, maxw=w - 220)
+        T.text(surf, title, (tx, y + 8), 19, T.FG, bold=True, maxw=w - 220)
         if s and s.get("waiting"):
             T.text(surf, "Needs input", (x + w - 16, y + 10), 16, T.ATTN, bold=True, anchor="topright")
         else:
@@ -279,19 +383,65 @@ class SessionsScreen:
 
     def _draw_menu(self, surf, rect):
         x, y, w, h = rect
+        items = self.menu_items()
         shade = pygame.Surface((w, h), pygame.SRCALPHA)
         shade.fill((0, 0, 0, 150))
         surf.blit(shade, (x, y))
-        mw, row = 360, 34
-        mh = 52 + row * len(self.quick)
+        mw, row = 360, 32
+        mh = 52 + row * len(items)
         mx, my = x + (w - mw) // 2, y + max(8, (h - mh) // 2)
         T.rrect(surf, T.PANEL, (mx, my, mw, mh), 12)
-        T.text(surf, "Quick replies", (mx + 18, my + 14), 18, T.FG, bold=True)
-        for i, q in enumerate(self.quick):
+        T.text(surf, "Reply", (mx + 18, my + 14), 18, T.FG, bold=True)
+        for i, q in enumerate(items):
             ry = my + 46 + i * row
-            if i == self.menu_sel:
+            on = i == self.menu_sel
+            if on:
                 T.rrect(surf, T.RAISED, (mx + 8, ry, mw - 16, row - 4), 8)
-            T.text(surf, q["label"], (mx + 20, ry + 6), 16, T.FG if i == self.menu_sel else T.DIM)
+            col = T.CLAUDE if q.get("kb") else (T.FG if on else T.DIM)
+            T.text(surf, q["label"], (mx + 20, ry + 5), 16, col, bold=q.get("kb", False))
+
+    def _draw_keyboard(self, surf, rect):
+        x, y, w, h = rect
+        shade = pygame.Surface((w, h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 170))
+        surf.blit(shade, (x, y))
+        pad = 14
+        kx, kw = x + pad, w - 2 * pad
+        # text buffer box
+        T.rrect(surf, T.TERM_BG, (kx, y + 12, kw, 46), 8)
+        shown = self.kb_text[-60:] if self.kb_text else "Type a message, then Send (Y)"
+        col = T.FG if self.kb_text else T.FAINT
+        T.text(surf, shown + ("_" if self.kb_text else ""), (kx + 12, y + 24), 18, col, mono=True, maxw=kw - 24)
+        # key grid
+        rows = self._kb_rows()
+        top = y + 72
+        cols = 10
+        cw = kw // cols
+        ch = 34
+        for r, rowstr in enumerate(rows):
+            ry = top + r * (ch + 4)
+            off = (kw - len(rowstr) * cw) // 2
+            for c, chx in enumerate(rowstr):
+                cx = kx + off + c * cw
+                on = (r == self.kb_r and c == self.kb_c)
+                T.rrect(surf, T.RAISED if on else T.PANEL, (cx + 2, ry, cw - 4, ch), 6)
+                if on:
+                    T.rrect(surf, T.CLAUDE, (cx + 2, ry, cw - 4, ch), 6, width=2)
+                T.text(surf, chx, (cx + cw // 2, ry + ch // 2), 18, T.FG, bold=True, anchor="center")
+        # action row
+        ry = top + len(rows) * (ch + 4)
+        aw = kw // len(KB_ACTIONS)
+        for c, act in enumerate(KB_ACTIONS):
+            cx = kx + c * aw
+            on = (self.kb_r == len(rows) and self.kb_c == c)
+            active = (act == "shift" and self.kb_shift)
+            base = T.CLAUDE if act == "send" else (T.RAISED if (on or active) else T.PANEL)
+            T.rrect(surf, base, (cx + 2, ry, aw - 4, ch), 6)
+            if on:
+                T.rrect(surf, T.FG, (cx + 2, ry, aw - 4, ch), 6, width=2)
+            lbl = KB_ACTION_LABEL[act]
+            tc = T.TERM_BG if act == "send" else T.FG
+            T.text(surf, lbl, (cx + aw // 2, ry + ch // 2), 15, tc, bold=True, anchor="center")
 
 
 # =========================================================================== Mac

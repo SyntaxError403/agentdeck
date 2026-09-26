@@ -83,6 +83,35 @@ def term_clean(line):
     return line.translate(_TERM_TABLE)
 
 
+_images = {}
+
+
+def image(name, size=None):
+    """Load assets/<name> once, scaled square to `size`. Returns None if missing."""
+    key = (name, size)
+    if key in _images:
+        return _images[key]
+    img = None
+    path = os.path.join(HERE, "assets", name)
+    if os.path.exists(path):
+        try:
+            img = pygame.image.load(path).convert_alpha()
+            if size:
+                img = pygame.transform.smoothscale(img, (size, size))
+        except Exception:
+            img = None
+    _images[key] = img
+    return img
+
+
+def icon(surf, name, center, size):
+    img = image(name, size)
+    if img:
+        surf.blit(img, img.get_rect(center=center))
+        return True
+    return False
+
+
 def rrect(surf, color, rect, radius=8, width=0):
     try:
         pygame.draw.rect(surf, color, rect, width, border_radius=radius)
